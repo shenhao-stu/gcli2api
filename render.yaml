@@ -9,12 +9,26 @@ services:
     healthCheckPath: /
 
     envVars:
-      # ========== 必填：访问密码 ==========
-      - key: PASSWORD
-        sync: false          # 部署时手动填写，不同步到代码库
-
       # ========== 服务器配置 ==========
       - key: HOST
         value: 0.0.0.0
       - key: PORT
         value: "10000"        # Render 要求 Web 服务监听 10000 端口
+
+      # ========== 密码配置 ==========
+      # API访问密码 (Bearer Token)
+      - key: API_PASSWORD
+        sync: false
+      # 控制面板登录密码
+      - key: PANEL_PASSWORD
+        sync: false
+
+      # ========== PostgreSQL 持久化存储 ==========
+      - key: POSTGRESQL_URI
+        sync: false
+
+      # ========== 保活配置（防止免费版休眠）==========
+      - key: KEEPALIVE_URL
+        sync: false
+      - key: KEEPALIVE_INTERVAL
+        value: "300"
