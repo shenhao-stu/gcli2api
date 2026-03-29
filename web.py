@@ -148,8 +148,8 @@ app.mount("/docs", StaticFiles(directory="docs"), name="docs")
 app.mount("/front", StaticFiles(directory="front"), name="front")
 
 
-# 保活接口（仅响应 HEAD）
-@app.head("/keepalive")
+# 保活接口
+@app.api_route("/keepalive", methods=["GET", "HEAD"])
 async def keepalive() -> Response:
     return Response(status_code=200)
 
