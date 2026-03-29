@@ -1,0 +1,87 @@
+name: Sync Upstream & Keep Alive
+
+on:
+  schedule:
+    # 每6小时同步一次上游 + 保活
+    - cron: "0 */6 * * *"
+    # 每5分钟保活（仅保活，不同步）
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    # 仅在定时同步（每6小时）或手动触发时运行
+    if: github.event.schedule != '*/5 * * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync upstream master
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git remote add upstream https://github.com/su-kaka/gcli2api.git
+          git fetch upstream master
+
+          # 检查是否有新提交
+          UPSTREAM_AHEAD=$(git rev-list HEAD..upstream/master --count)
+          echo "new_commits=$UPSTREAM_AHEAD" >> $GITHUB_ENV
+
+          if [ "$UPSTREAM_AHEAD" -eq 0 ]; then
+            echo "Already up to date with upstream."
+            exit 0
+          fi
+
+          echo "Found $UPSTREAM_AHEAD new commits from upstream."
+
+          git checkout master
+
+          # 收集 fork 专属提交（排除自动生成的 version.txt 更新）
+          FORK_COMMITS=$(git log upstream/master..master --format=%H --grep="update version.txt" --invert-grep | tac)
+
+          # 重置到上游
+          git reset --hard upstream/master
+
+          # 重新应用 fork 专属提交
+          if [ -n "$FORK_COMMITS" ]; then
+            echo "Re-applying fork-specific commits..."
+            for commit in $FORK_COMMITS; do
+              echo "  cherry-pick $commit"
+              git cherry-pick "$commit"
+            done
+          fi
+
+          git push origin master --force-with-lease
+
+      - name: Update render-deploy branch
+        if: env.new_commits != '0'
+        run: |
+          # 检查远程是否存在 render-deploy 分支
+          if git ls-remote --exit-code origin render-deploy > /dev/null 2>&1; then
+            git checkout render-deploy
+            git merge master -m "chore: sync upstream changes into render-deploy"
+            git push origin render-deploy
+            echo "render-deploy branch updated."
+          else
+            echo "render-deploy branch does not exist on remote, skipping."
+          fi
+
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render service
+        run: |
+          HTTP_CODE=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 30 \
+            "${{ secrets.RENDER_KEEPALIVE_URL }}" 2>/dev/null || echo "TIMEOUT")
+          echo "Keepalive ping: [$HTTP_CODE] ${{ secrets.RENDER_KEEPALIVE_URL }}"
+          # 不因非200状态码失败，Render冷启动可能返回5xx
+          if [ "$HTTP_CODE" = "TIMEOUT" ]; then
+            echo "::warning::Keepalive request timed out"
+          fi
