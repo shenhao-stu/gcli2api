@@ -10,7 +10,7 @@ security = HTTPBearer()
 
 # ====================== OAuth Configuration ======================
 
-_GEMINICLI_VERSION = "0.34.0"
+_GEMINICLI_VERSION = "0.35.2"
 _GEMINICLI_PLATFORM = "win32"
 _GEMINICLI_ARCH = "x64"
 _GEMINICLI_SURFACE = "cloud-shell"
@@ -72,10 +72,8 @@ DEFAULT_SAFETY_SETTINGS = [
 BASE_MODELS = [
     "gemini-2.5-pro",
     "gemini-2.5-flash",
-    "gemini-3-pro-preview",
     "gemini-3-flash-preview",
-    "gemini-3.1-pro-preview",
-    "gemini-3.1-flash-lite-preview"
+    "gemini-3.1-pro-preview"
 ]
 
 
