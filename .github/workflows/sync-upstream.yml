@@ -24,24 +24,28 @@ jobs:
 
       - name: Sync upstream master
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
           git remote add upstream https://github.com/su-kaka/gcli2api.git
           git fetch upstream master
 
-          # 检查是否有新提交
-          NEW_COMMITS=$(git rev-list HEAD..upstream/master --count)
-          echo "new_commits=$NEW_COMMITS" >> $GITHUB_ENV
+          # 检查是否有新提交（包括upstream领先的提交）
+          UPSTREAM_AHEAD=$(git rev-list HEAD..upstream/master --count)
+          echo "new_commits=$UPSTREAM_AHEAD" >> $GITHUB_ENV
 
-          if [ "$NEW_COMMITS" -eq 0 ]; then
+          if [ "$UPSTREAM_AHEAD" -eq 0 ]; then
             echo "Already up to date with upstream."
             exit 0
           fi
 
-          echo "Found $NEW_COMMITS new commits from upstream."
+          echo "Found $UPSTREAM_AHEAD new commits from upstream."
 
-          # Fast-forward master
+          # Rebase fork-specific commits on top of upstream
+          # This handles the case where master has diverged (e.g., workflow file)
           git checkout master
-          git merge upstream/master --ff-only
-          git push origin master
+          git rebase upstream/master
+          git push origin master --force-with-lease
 
       - name: Update render-deploy branch
         if: env.new_commits != '0'
