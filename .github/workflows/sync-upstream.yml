@@ -30,7 +30,7 @@ jobs:
           git remote add upstream https://github.com/su-kaka/gcli2api.git
           git fetch upstream master
 
-          # 检查是否有新提交（包括upstream领先的提交）
+          # 检查是否有新提交
           UPSTREAM_AHEAD=$(git rev-list HEAD..upstream/master --count)
           echo "new_commits=$UPSTREAM_AHEAD" >> $GITHUB_ENV
 
@@ -41,10 +41,23 @@ jobs:
 
           echo "Found $UPSTREAM_AHEAD new commits from upstream."
 
-          # Rebase fork-specific commits on top of upstream
-          # This handles the case where master has diverged (e.g., workflow file)
           git checkout master
-          git rebase upstream/master
+
+          # 收集 fork 专属提交（排除自动生成的 version.txt 更新）
+          FORK_COMMITS=$(git log upstream/master..master --format=%H --grep="update version.txt" --invert-grep | tac)
+
+          # 重置到上游
+          git reset --hard upstream/master
+
+          # 重新应用 fork 专属提交
+          if [ -n "$FORK_COMMITS" ]; then
+            echo "Re-applying fork-specific commits..."
+            for commit in $FORK_COMMITS; do
+              echo "  cherry-pick $commit"
+              git cherry-pick "$commit"
+            done
+          fi
+
           git push origin master --force-with-lease
 
       - name: Update render-deploy branch
