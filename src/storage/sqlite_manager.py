@@ -1303,8 +1303,14 @@ class SQLiteManager:
                         row = await cursor.fetchone()
                         if row:
                             cooldowns = json.loads(row[0] or '{}')
-                            if model_name in cooldowns:
-                                cooldowns.pop(model_name)
+                            base_model = model_name.replace("-thinking", "")
+                            keys_to_clear = {model_name, base_model}
+                            changed = False
+                            for key in keys_to_clear:
+                                if key in cooldowns:
+                                    cooldowns.pop(key)
+                                    changed = True
+                            if changed:
                                 await db.execute(f"""
                                     UPDATE {table_name}
                                     SET model_cooldowns = ?, updated_at = unixepoch()

@@ -268,12 +268,14 @@ class PSQLManager:
                         return None
 
                     is_preview_model = "preview" in model_name.lower()
+                    # Normalize model name for cooldown lookup
+                    normalized = model_name.replace("-thinking", "")
                     non_preview_creds = []
                     preview_creds = []
 
                     for row in rows:
                         model_cooldowns = json.loads(row["model_cooldowns"] or "{}")
-                        cd = model_cooldowns.get(model_name)
+                        cd = model_cooldowns.get(normalized)
                         if cd is None or current_time >= cd:
                             if row["preview"]:
                                 preview_creds.append((row["filename"], row["credential_data"]))
@@ -303,9 +305,11 @@ class PSQLManager:
                             return rows[0]["filename"], json.loads(rows[0]["credential_data"])
                         return None
 
+                    # Normalize model name for cooldown lookup
+                    normalized = model_name.replace("-thinking", "")
                     for row in rows:
                         model_cooldowns = json.loads(row["model_cooldowns"] or "{}")
-                        cd = model_cooldowns.get(model_name)
+                        cd = model_cooldowns.get(normalized)
                         if cd is None or current_time >= cd:
                             return row["filename"], json.loads(row["credential_data"])
 
@@ -911,10 +915,13 @@ class PSQLManager:
 
                 model_cooldowns = json.loads(row["model_cooldowns"] or "{}")
 
+                # Normalize model name: strip -thinking suffix so variants
+                # share the same cooldown key
+                normalized = model_name.replace("-thinking", "")
                 if cooldown_until is None:
-                    model_cooldowns.pop(model_name, None)
+                    model_cooldowns.pop(normalized, None)
                 else:
-                    model_cooldowns[model_name] = cooldown_until
+                    model_cooldowns[normalized] = cooldown_until
 
                 await conn.execute(
                     f"""
@@ -962,8 +969,17 @@ class PSQLManager:
                     )
                     if row:
                         cooldowns = json.loads(row["model_cooldowns"] or "{}")
-                        if model_name in cooldowns:
-                            cooldowns.pop(model_name)
+                        # Clear cooldown for the exact model name AND the base name
+                        # (without -thinking suffix) so that success on one variant
+                        # unblocks the other variant sharing the same underlying model
+                        base_model = model_name.replace("-thinking", "")
+                        keys_to_clear = {model_name, base_model}
+                        changed = False
+                        for key in keys_to_clear:
+                            if key in cooldowns:
+                                cooldowns.pop(key)
+                                changed = True
+                        if changed:
                             await conn.execute(
                                 f"""
                                 UPDATE {table_name}

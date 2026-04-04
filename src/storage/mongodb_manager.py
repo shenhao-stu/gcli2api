@@ -1433,15 +1433,20 @@ class MongoDBManager:
             )
 
             # 条件删除模型冷却：只有该键存在时才写入
+            # Also clear the base model name (without -thinking suffix) so that
+            # success on one variant unblocks the other
             if model_name:
-                escaped = self._escape_model_name(model_name)
-                await collection.update_one(
-                    {"filename": filename, f"model_cooldowns.{escaped}": {"$exists": True}},
-                    {"$unset": {f"model_cooldowns.{escaped}": ""}, "$set": {"updated_at": now}}
-                )
-                # 同步删除 Redis 冷却 key
-                if self._redis_enabled:
-                    await self._redis.delete(self._rk_cd(mode, filename, escaped))
+                base_model = model_name.replace("-thinking", "")
+                keys_to_clear = {model_name, base_model}
+                for key in keys_to_clear:
+                    escaped = self._escape_model_name(key)
+                    await collection.update_one(
+                        {"filename": filename, f"model_cooldowns.{escaped}": {"$exists": True}},
+                        {"$unset": {f"model_cooldowns.{escaped}": ""}, "$set": {"updated_at": now}}
+                    )
+                    # 同步删除 Redis 冷却 key
+                    if self._redis_enabled:
+                        await self._redis.delete(self._rk_cd(mode, filename, escaped))
 
         except Exception as e:
             log.error(f"Error recording success for {filename}: {e}")

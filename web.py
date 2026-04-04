@@ -55,6 +55,22 @@ async def lifespan(app: FastAPI):
         # 这里预先触发初始化以便在启动时检测错误
         await credential_manager._get_or_create()
         log.info("凭证管理器初始化成功")
+
+        # 启动时清除所有模型级冷却（防止残留冷却阻塞请求）
+        try:
+            from src.storage_adapter import get_storage_adapter
+            adapter = await get_storage_adapter()
+            if hasattr(adapter._backend, '_pool'):
+                # PostgreSQL backend
+                async with adapter._backend._pool.acquire() as conn:
+                    for table in ['geminicli_credentials', 'antigravity_credentials']:
+                        await conn.execute(f"""
+                            UPDATE {table} SET model_cooldowns = '{{}}'
+                            WHERE model_cooldowns IS NOT NULL AND model_cooldowns != '{{}}'
+                        """)
+                log.info("启动清理: 已重置所有模型冷却状态")
+        except Exception as e:
+            log.warning(f"启动清理模型冷却失败（非致命）: {e}")
     except Exception as e:
         log.error(f"凭证管理器初始化失败: {e}")
         global_credential_manager = None
