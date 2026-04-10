@@ -8,7 +8,7 @@ import json
 import os
 import time
 import zipfile
-from typing import List
+from typing import Any, List
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Response
 from fastapi.responses import JSONResponse
@@ -86,6 +86,20 @@ async def extract_json_files_from_zip(zip_file: UploadFile) -> List[dict]:
     except Exception as e:
         log.error(f"处理ZIP文件失败: {e}")
         raise HTTPException(status_code=500, detail=f"处理ZIP文件失败: {str(e)}")
+
+
+async def clear_all_model_cooldowns_for_credential(
+    storage_adapter: Any,
+    filename: str,
+    mode: str,
+) -> None:
+    """清空指定凭证的所有模型冷却（后端支持时执行）。"""
+    try:
+        cleared = await storage_adapter._backend.clear_all_model_cooldowns(filename, mode=mode)
+        if not cleared:
+            log.warning(f"清空模型CD失败或凭证不存在: {filename} (mode={mode})")
+    except Exception as e:
+        log.warning(f"清空模型CD时出错: {filename} (mode={mode}), error={e}")
 
 
 async def upload_credentials_common(
@@ -269,6 +283,8 @@ async def get_creds_status_common(
 
         if mode == "geminicli":
             cred_info["preview"] = summary.get("preview", True)
+        else:
+            cred_info["enable_credit"] = summary.get("enable_credit", False)
 
         creds_list.append(cred_info)
 
@@ -549,12 +565,21 @@ async def verify_credential_project_common(filename: str, mode: str = "geminicli
         api_base_url = await get_code_assist_endpoint()
         user_agent = GEMINICLI_USER_AGENT
 
-    # 重新获取project id
-    project_id, subscription_tier = await fetch_project_id_and_tier(
-        access_token=credentials.access_token,
-        user_agent=user_agent,
-        api_base_url=api_base_url
-    )
+    # 重新获取project id（仅 antigravity 模式请求积分）
+    if mode == "antigravity":
+        project_id, subscription_tier, credit_amount = await fetch_project_id_and_tier(
+            access_token=credentials.access_token,
+            user_agent=user_agent,
+            api_base_url=api_base_url,
+            include_credits=True,
+        )
+    else:
+        project_id, subscription_tier = await fetch_project_id_and_tier(
+            access_token=credentials.access_token,
+            user_agent=user_agent,
+            api_base_url=api_base_url,
+        )
+        credit_amount = None
 
     if project_id:
         credential_data["project_id"] = project_id
@@ -579,13 +604,18 @@ async def verify_credential_project_common(filename: str, mode: str = "geminicli
 
         log.info(f"检验 {mode} 凭证成功: {filename} - Project ID: {project_id}, Tier: {subscription_tier} - 已解除禁用并清除错误码")
 
-        return JSONResponse(content={
+        response_data = {
             "success": True,
             "filename": filename,
             "project_id": project_id,
             "subscription_tier": subscription_tier,
             "message": "检验成功！Project ID已更新，已解除禁用状态并清除错误码，403错误应该已恢复"
-        })
+        }
+
+        if mode == "antigravity" and credit_amount is not None:
+            response_data["credit_amount"] = credit_amount
+
+        return JSONResponse(content=response_data)
     else:
         return JSONResponse(
             status_code=400,
@@ -711,6 +741,8 @@ async def get_cred_detail(
 
         if mode == "geminicli":
             result["preview"] = file_status.get("preview", True)
+        else:
+            result["enable_credit"] = file_status.get("enable_credit", False)
 
         if backend_type == "file" and os.path.exists(filename):
             result.update({
@@ -733,7 +765,7 @@ async def creds_action(
     token: str = Depends(verify_panel_token),
     mode: str = "geminicli"
 ):
-    """对凭证文件执行操作（启用/禁用/删除）"""
+    """对凭证文件执行操作（启用/禁用/删除/enable_credit开关）"""
     try:
         mode = validate_mode(mode)
 
@@ -798,6 +830,28 @@ async def creds_action(
                 log.error(f"删除凭证 {filename} 时出错: {e}")
                 raise HTTPException(status_code=500, detail=f"删除文件失败: {str(e)}")
 
+        elif action == "enable_credit":
+            if mode != "antigravity":
+                raise HTTPException(status_code=400, detail="enable_credit 仅支持 antigravity 模式")
+            updated = await storage_adapter.update_credential_state(
+                filename, {"enable_credit": True}, mode=mode
+            )
+            if updated:
+                await clear_all_model_cooldowns_for_credential(storage_adapter, filename, mode)
+                return JSONResponse(content={"message": f"已开启凭证信用额度模式 {os.path.basename(filename)}"})
+            raise HTTPException(status_code=500, detail="开启信用额度模式失败，可能凭证不存在")
+
+        elif action == "disable_credit":
+            if mode != "antigravity":
+                raise HTTPException(status_code=400, detail="disable_credit 仅支持 antigravity 模式")
+            updated = await storage_adapter.update_credential_state(
+                filename, {"enable_credit": False}, mode=mode
+            )
+            if updated:
+                await clear_all_model_cooldowns_for_credential(storage_adapter, filename, mode)
+                return JSONResponse(content={"message": f"已关闭凭证信用额度模式 {os.path.basename(filename)}"})
+            raise HTTPException(status_code=500, detail="关闭信用额度模式失败，可能凭证不存在")
+
         else:
             raise HTTPException(status_code=400, detail="无效的操作类型")
 
@@ -814,7 +868,7 @@ async def creds_batch_action(
     token: str = Depends(verify_panel_token),
     mode: str = "geminicli"
 ):
-    """批量对凭证文件执行操作（启用/禁用/删除）"""
+    """批量对凭证文件执行操作（启用/禁用/删除/enable_credit开关）"""
     try:
         mode = validate_mode(mode)
 
@@ -866,6 +920,32 @@ async def creds_batch_action(
                             continue
                     except Exception as e:
                         errors.append(f"{filename}: 删除文件失败 - {str(e)}")
+                        continue
+                elif action == "enable_credit":
+                    if mode != "antigravity":
+                        errors.append(f"{filename}: enable_credit 仅支持 antigravity 模式")
+                        continue
+                    updated = await storage_adapter.update_credential_state(
+                        filename, {"enable_credit": True}, mode=mode
+                    )
+                    if updated:
+                        await clear_all_model_cooldowns_for_credential(storage_adapter, filename, mode)
+                        success_count += 1
+                    else:
+                        errors.append(f"{filename}: 开启信用额度模式失败")
+                        continue
+                elif action == "disable_credit":
+                    if mode != "antigravity":
+                        errors.append(f"{filename}: disable_credit 仅支持 antigravity 模式")
+                        continue
+                    updated = await storage_adapter.update_credential_state(
+                        filename, {"enable_credit": False}, mode=mode
+                    )
+                    if updated:
+                        await clear_all_model_cooldowns_for_credential(storage_adapter, filename, mode)
+                        success_count += 1
+                    else:
+                        errors.append(f"{filename}: 关闭信用额度模式失败")
                         continue
                 else:
                     errors.append(f"{filename}: 无效的操作类型")
