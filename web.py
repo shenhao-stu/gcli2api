@@ -196,8 +196,8 @@ def main():
         config.loglevel = "INFO"
 
         # 设置连接超时
-        config.keep_alive_timeout = 600
-        config.read_timeout = 600
+        config.keep_alive_timeout = 900
+        config.read_timeout = 900
 
         await serve(app, config)
 
@@ -222,8 +222,8 @@ def main():
         config.loglevel = "INFO"
         config.workers = workers
         config.application_path = "web:app"
-        config.keep_alive_timeout = 600
-        config.read_timeout = 600
+        config.keep_alive_timeout = 900
+        config.read_timeout = 900
 
         run(config)
 
