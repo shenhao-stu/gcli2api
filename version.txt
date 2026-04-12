@@ -1,4 +1,4 @@
-full_hash=a89888e697a2ee75213c68c3dd6297b3341d101a
-short_hash=a89888e
-message=优化流式抗截断
-date=2026-04-12 00:26:45 +0800
+full_hash=e3ab37a64738c0a9bf7721a2f11bf12388fccf80
+short_hash=e3ab37a
+message=调整说明
+date=2026-04-12 14:08:52 +0800
