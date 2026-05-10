@@ -140,16 +140,23 @@ def _normalize_function_name(name: str) -> str:
 
 def _resolve_ref(ref: str, root_schema: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
-    解析 $ref 引用
+    解析 $ref 或 ref 引用
     
     Args:
-        ref: 引用路径，如 "#/definitions/MyType"
+        ref: 引用路径，如 "#/definitions/MyType" 或 "#/$defs/MyType"
         root_schema: 根 schema 对象
         
     Returns:
         解析后的 schema，如果失败返回 None
     """
+    if not isinstance(ref, str):
+        return None
+        
     if not ref.startswith('#/'):
+        # 尝试在 definitions 或 $defs 中查找
+        for key in ["definitions", "$defs"]:
+            if key in root_schema and ref in root_schema[key]:
+                return root_schema[key][ref]
         return None
     
     path = ref[2:].split('/')
@@ -356,22 +363,26 @@ def _clean_schema_for_gemini(schema: Any, root_schema: Optional[Dict[str, Any]] 
     # 创建副本避免修改原对象
     result = {}
     
-    # 1. 处理 $ref
-    if "$ref" in schema:
-        resolved = _resolve_ref(schema["$ref"], root_schema)
+    # 1. 处理 $ref 或 ref
+    ref_key = "$ref" if "$ref" in schema else ("ref" if "ref" in schema else None)
+    if ref_key:
+        resolved = _resolve_ref(schema[ref_key], root_schema)
         if resolved:
-            # 检测循环引用：若 resolved 已在 visited 中，直接返回占位符
+            # 检测循环引用
             resolved_id = id(resolved)
             if resolved_id in visited:
                 return {"type": "OBJECT", "description": "(circular reference)"}
-            # 将 resolved 的 id 加入 visited，防止后续递归时重复处理
+            
             visited.add(resolved_id)
-            # 合并解析后的 schema 和当前 schema（浅拷贝，避免 deepcopy 爆栈）
+            # 合并解析后的 schema
             merged = dict(resolved)
-            # 当前 schema 的其他字段会覆盖解析后的字段
-            for key, value in schema.items():
-                if key != "$ref":
-                    merged[key] = value
+            
+            # 重要：根据 Gemini API 限制，当存在引用时，只能并列存在 description 和 default
+            # 其他字段（如 type, properties 等）必须丢弃，否则会触发 400 错误
+            for key in ["description", "default"]:
+                if key in schema:
+                    merged[key] = schema[key]
+            
             schema = merged
             result = {}
     
@@ -500,7 +511,7 @@ def _clean_schema_for_gemini(schema: Any, root_schema: Optional[Dict[str, Any]] 
     
     # 7. 清理不支持的字段
     unsupported_keys = {
-        "title", "$schema", "$ref", "strict", "exclusiveMaximum",
+        "title", "$schema", "$ref", "ref", "strict", "exclusiveMaximum",
         "exclusiveMinimum", "additionalProperties", "oneOf", "allOf",
         "$defs", "definitions", "example", "examples", "readOnly",
         "writeOnly", "const", "additionalItems", "contains",

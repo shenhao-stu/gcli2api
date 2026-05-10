@@ -1,4 +1,4 @@
-full_hash=ccb75bdcfe34397c96f1ec49b770b36233a2a5b5
-short_hash=ccb75bd
-message=Update utils.py
-date=2026-05-05 17:59:11 +0800
+full_hash=c2d54b5702ff6be716ef5d6865b0efdc99e26a15
+short_hash=c2d54b5
+message=Merge pull request #374 from kushaldotdev/fix/gemini-schema-ref-validation
+date=2026-05-10 09:03:19 +0800
