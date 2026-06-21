@@ -1,4 +1,4 @@
-full_hash=10ed71fa70d819677b4baf9bc9a3badf57fabf5f
-short_hash=10ed71f
-message=agy请求更新为agy cli模式
-date=2026-06-20 23:46:21 +0800
+full_hash=15096b5d57b1f642b2e2a4c6261a966890cd7ac2
+short_hash=15096b5
+message=修复对话无法进行的bug
+date=2026-06-21 21:08:15 +0800
